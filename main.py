@@ -27,13 +27,13 @@ def extract_data():
     response = requests.get(url)
     data = json.loads(response.text)
 
-    standings = []
+    leaderboard = []
     drivers = []
     teams = {}
     for driver in data["MRData"]["StandingsTable"]["StandingsLists"][0][
         "DriverStandings"
     ]:
-        standings.append(
+        leaderboard.append(
             [
                 driver["position"],
                 driver["Driver"]["givenName"],
@@ -67,15 +67,15 @@ def extract_data():
                 ]
             ]
 
-    return races, standings, drivers, teams, circuits
+    return races, leaderboard, drivers, teams, circuits
 
 
 # Extract the race schedule from the JSON data
-races, standings, drivers, teams, circuits = extract_data()
+races, leaderboard, drivers, teams, circuits = extract_data()
 
 # print("Races :", races)
 # print("\n------------------------\n")
-# print("Standings :", standings)
+# print("leaderboard :", leaderboard)
 # print("\n------------------------\n")
 # print("Drivers :", drivers)
 # print("\n------------------------\n")
@@ -87,35 +87,77 @@ races, standings, drivers, teams, circuits = extract_data()
 nlp = spacy.load("en_core_web_sm")
 
 
+def extract_fuzzy_info(text):
+    for word in text.split():
+        if word in drivers:
+            return f"Driver name: {drivers[1]} {drivers[2]}\nTeam: {drivers[3]}"
+        elif word in teams:
+            d1 = teams[word][0][1:]
+            d2 = teams[word][1][1:]
+            d1 = " ".join(d1)
+            d2 = " ".join(d2)
+            return f"Team name: {word}\nDrivers: {d1} and {d2}"
+        elif word in circuits:
+            return f"Circuit name: {circuits[1]}"
+
+    return "I'm sorry, I didn't understand your request. Please try again."
+
+
 # Define a function to extract the relevant information from a user request
 def extract_info(text):
     doc = nlp(text)
-    print("Entities", [(ent.text, ent.label_) for ent in doc.ents])
     # Check if the user is asking for the race schedule
-    if "schedule" in [token.text.lower() for token in doc]:
+    words = text.lower().split()
+
+    if "schedule" in words or "date" in words or "time" in words or "when" in words:
         return get_race_schedule()
     # Check if the user is asking for race results
-    elif "standings" in [token.text.lower() for token in doc]:
+    elif "winner" in words or "win" in words or "results" in words or "race" in words:
+        return standings()
+
+    elif "standing" in words or "standings" in words or "leaderboard" in words:
         return standings()
 
     for ent in doc.ents:
+        # print(ent.text, ent.label_)
         if ent.label_ == "PERSON":
             if ent.text:
                 return get_driver_info(ent.text)
 
-    for ent in doc.ents:
-        if ent.label_ == "ORG":
+        if ent.label_ in ["NORP", "GPE"]:
             if ent.text:
                 return get_team_info(ent.text)
 
-    for ent in doc.ents:
-        if ent.label_ in ["LOC", "FAC"]:
+        if ent.label_ in ["LOC", "FAC", "GPE", "ORG"]:
             if ent.text:
                 return get_circuit_info(ent.text)
 
-    # If the user's request doesn't match any of the above categories, return a default response
-    else:
-        return "I'm sorry, I didn't understand your request. Please try again."
+        if ent.label_ == "DATE":
+            # If the user asks for the race schedule for the next Grand Prix
+            if "next" in words:
+                # Make a request to the Ergast API to get the schedule for the next race
+                response = "The race schedule for the next Grand Prix is : "
+                for race in races:
+                    if race["date"] >= ent.text:
+                        return (
+                            "The race schedule for the next Grand Prix is: "
+                            + race["raceName"]
+                            + " on "
+                            + race["date"]
+                            + "\n"
+                        )
+
+            else:
+                for race in races:
+                    if race["date"] >= ent.text:
+                        return (
+                            "The next race is : "
+                            + race["raceName"]
+                            + " on "
+                            + race["date"]
+                        )
+
+    return extract_fuzzy_info(text)
 
 
 # Define a function to generate a response to a user query
@@ -139,20 +181,29 @@ def get_race_schedule():
 
 # Define a function to generate a response to a user query for race results
 def standings():
-    race_results = "Race results todo"
+    race_results = "F1 2023 Standings:\n"
+
+    for driver in leaderboard:
+        race_results += (
+            f"{driver[0]}: {driver[1]} {driver[2]} - {driver[3]} - {driver[4]} points\n"
+        )
+
     return race_results
 
 
 # Define a function to generate a response to a user query for driver information
-def get_driver_info(driver_name):
-    txt = driver_name.split()
+def get_driver_info(driver_text):
+    url = (
+        "http://ergast.com/api/f1/drivers/"
+        + driver_text.lower().replace(" ", "_")
+        + "/career.json"
+    )
+    response_json = requests.get(url).json()
+    seasons = response_json["MRData"]["CareerTable"]["Seasons"]
+    for season in seasons:
+        response += season["season"] + ": " + season["Constructor"]["name"] + "\n"
 
-    for t in txt:
-        for d in drivers:
-            if t in d:
-                return f"Driver name: {d[1]} {d[2]}\nTeam: {d[3]}"
-
-    return f"{driver_name} is not a Formula 1 driver in 2023."
+    return response
 
 
 # Define a function to generate a response to a user query for team information
@@ -169,8 +220,30 @@ def get_team_info(team_name):
 
 # Define a function to generate a response to a user query for circuit information
 def get_circuit_info(circuit_name):
-    circuit_info = f"Circuit name: {circuit_name}"
-    return circuit_info
+    for t in circuit_name.split():
+        for c in circuits:
+            if t in c:
+                return f"Circuit name: {c[1]}\nLocation: {c[2]}"
+
+    return f"{circuit_name} is not a Formula 1 circuit in 2023."
 
 
-print(extract_info("is Sebastian Vettel a Ferrari driver?"))
+def handle_input():
+    print(
+        "Welcome to F1 chatbot! Ask me about the current season's schedule, standings, drivers, teams or circuits."
+    )
+    while True:
+        # Prompt the user to input a message
+        message = input("You: ")
+        # Check if the user has said goodbye
+        if message in ["bye", "goodbye", "exit"]:
+            print("Chatbot: Bye!")
+            break
+        # Extract the relevant information from the user's message
+        response = extract_info(message)
+        # Print the chatbot's response
+        print("Chatbot:", response)
+
+
+if __name__ == "__main__":
+    handle_input()
