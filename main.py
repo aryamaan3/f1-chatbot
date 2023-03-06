@@ -117,6 +117,9 @@ def extract_info(text):
 
     elif "standing" in words or "standings" in words or "leaderboard" in words:
         return standings()
+    
+    elif "leading" in words or "leader" in words or "winning" in words:
+        return standings()
 
     for ent in doc.ents:
         # print(ent.text, ent.label_)
