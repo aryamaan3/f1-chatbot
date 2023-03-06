@@ -223,7 +223,7 @@ def get_circuit_info(circuit_name):
     for t in circuit_name.split():
         for c in circuits:
             if t in c:
-                return f"Circuit name: {c[1]}\nLocation: {c[2]}"
+                return f"Circuit name: {c[1]}\nLocation: {c[2]}, {c[3]}"
 
     return f"{circuit_name} is not a Formula 1 circuit in 2023."
 
