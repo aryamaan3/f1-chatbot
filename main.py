@@ -1,7 +1,7 @@
 import requests
 import json
 import spacy
-
+import datetime
 
 # Define a function to extract the relevant information from the JSON data
 def extract_data():
@@ -47,6 +47,7 @@ def extract_data():
                 driver["Driver"]["driverId"],
                 driver["Driver"]["givenName"],
                 driver["Driver"]["familyName"],
+                driver["Driver"]["nationality"],
                 driver["Constructors"][0]["name"],
             ]
         )
@@ -109,8 +110,13 @@ def extract_info(text):
     # Check if the user is asking for the race schedule
     words = text.lower().split()
 
-    if "schedule" in words or "date" in words or "time" in words or "when" in words:
-        return get_race_schedule()
+    if "schedule" in words or "race" in words or "date" in words or "time" in words or "when" in words:
+        if "previous" in words and "won" not in words:
+            return get_race_schedule()[1]
+        elif "won" in words:
+            return get_last_race_winner()
+        else:
+            return get_race_schedule()[0]
     # Check if the user is asking for race results
     elif "winner" in words or "win" in words or "results" in words or "race" in words:
         return standings()
@@ -122,6 +128,7 @@ def extract_info(text):
         return standings()
 
     for ent in doc.ents:
+        print(ent.text, ent.label_)
         # print(ent.text, ent.label_)
         if ent.label_ == "PERSON":
             if ent.text:
@@ -162,24 +169,39 @@ def extract_info(text):
 
     return extract_fuzzy_info(text)
 
+def get_last_race_winner():
+    url = 'http://ergast.com/api/f1/current/last/results.json'
+    response = requests.get(url)
+    data = json.loads(response.text)
+    winner = data["MRData"]["RaceTable"]["Races"][0]["Results"][0]["Driver"]["givenName"] + " " + data["MRData"]["RaceTable"]["Races"][0]["Results"][0]["Driver"]["familyName"]
+    return winner
+
 
 # Define a function to generate a response to a user query
 def get_race_schedule():
     # Construct a string with information on each upcoming race
     race_info = ""
+    race_info_previous = ""
+    current_date = datetime.date.today()
     for race in races:
         round_number = race["round"]
         race_name = race["raceName"]
         date = race["date"]
         time = race["time"]
         location = race["Circuit"]["Location"]["country"]
-        race_info += (
-            f"Round {round_number}: {race_name} on {date} at {time} in {location}\n"
-        )
+        if datetime.datetime.strptime(date, '%Y-%m-%d').date() > current_date:
+            race_info += (
+                f"Round {round_number}: {race_name} on {date} at {time} in {location}\n"
+            )
+        else:
+            race_info_previous += (
+                f"Round {round_number}: {race_name} on {date} at {time} in {location}\n"
+            )
 
     # Construct the final response string
-    response = f"The race schedule for the current season is:\n{race_info}"
-    return response
+    response_next = f"The next races for the current season are:\n{race_info}"
+    response_previous = f"The previous races for the current season are:\n{race_info_previous}"
+    return response_next, response_previous
 
 
 # Define a function to generate a response to a user query for race results
@@ -196,17 +218,10 @@ def standings():
 
 # Define a function to generate a response to a user query for driver information
 def get_driver_info(driver_text):
-    url = (
-        "http://ergast.com/api/f1/drivers/"
-        + driver_text.lower().replace(" ", "_")
-        + "/career.json"
-    )
-    response_json = requests.get(url).json()
-    seasons = response_json["MRData"]["CareerTable"]["Seasons"]
-    for season in seasons:
-        response += season["season"] + ": " + season["Constructor"]["name"] + "\n"
-
-    return response
+    txt = driver_text.split(" ")
+    for driver in drivers:
+        if txt[1] in driver:
+            return f"Driver name: {driver[1]} {driver[2]}\nNationality: {driver[3]} \nTeam: {driver[4]}"
 
 
 # Define a function to generate a response to a user query for team information
@@ -245,7 +260,7 @@ def handle_input():
         # Extract the relevant information from the user's message
         response = extract_info(message)
         # Print the chatbot's response
-        print("Chatbot:", response)
+        print("Chatbot:", response,"\n")
 
 
 if __name__ == "__main__":
